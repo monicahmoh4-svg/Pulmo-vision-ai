@@ -10,6 +10,7 @@ we normalise them to postgresql+asyncpg:// here.
 
 import os
 import logging
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
@@ -29,6 +30,22 @@ def _build_url(raw: str) -> str:
         raw = raw.replace("postgresql://", "postgresql+asyncpg://", 1)
 
     # SQLite: keep as-is
+    if "sqlite" in raw:
+        return raw
+
+    # asyncpg does NOT accept psycopg2-style query params like sslmode, sslcert, etc.
+    # Strip them all out — SSL is handled via connect_args={"ssl": "require"} instead.
+    parsed = urlparse(raw)
+    if parsed.query:
+        # Remove known psycopg2-only params; keep anything asyncpg understands
+        _PSYCOPG2_ONLY = {"sslmode", "sslcert", "sslkey", "sslrootcert", "sslcrl",
+                          "connect_timeout", "application_name", "options"}
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        qs_clean = {k: v for k, v in qs.items() if k not in _PSYCOPG2_ONLY}
+        clean_query = urlencode(qs_clean, doseq=True)
+        parsed = parsed._replace(query=clean_query)
+        raw = urlunparse(parsed)
+
     return raw
 
 
