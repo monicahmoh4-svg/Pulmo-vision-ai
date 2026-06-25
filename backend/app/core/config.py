@@ -34,9 +34,9 @@ class Settings(BaseSettings):
         "DATABASE_URL", "sqlite+aiosqlite:///./lungdenoise.db"
     )
 
-    # Storage
-    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "uploads")
-    OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "outputs")
+    # Storage — default to /tmp which is always writable on Render
+    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "/tmp/uploads")
+    OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "/tmp/outputs")
     MAX_FILE_SIZE_MB: int = 50
 
     # Pipeline defaults
@@ -57,7 +57,18 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Ensure local directories exist (safe on Render disk mounts)
-os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
-os.makedirs("app/models", exist_ok=True)
+# Ensure local directories exist — use only /tmp-based or relative paths on Render
+def _safe_makedirs(path: str) -> None:
+    """Only create the directory if it's a relative path or under /tmp."""
+    abs_path = os.path.abspath(path)
+    if abs_path.startswith("/tmp") or not os.path.isabs(path):
+        os.makedirs(abs_path, exist_ok=True)
+    else:
+        # Fall back to a /tmp mirror so the app still has a working directory
+        fallback = os.path.join("/tmp", os.path.basename(abs_path))
+        os.makedirs(fallback, exist_ok=True)
+
+
+_safe_makedirs(settings.UPLOAD_DIR)
+_safe_makedirs(settings.OUTPUT_DIR)
+_safe_makedirs("app/models")
