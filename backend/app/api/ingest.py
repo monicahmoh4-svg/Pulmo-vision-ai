@@ -17,6 +17,8 @@ from app.services.denoising_pipeline import estimate_noise_wavelet
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+MAX_BYTES = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+
 
 @router.post("/ingest")
 async def ingest_image(
@@ -26,10 +28,13 @@ async def ingest_image(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload and preprocess a CT scan image."""
-    if file.size and file.size > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
-        raise HTTPException(413, f"File exceeds {settings.MAX_FILE_SIZE_MB} MB limit")
-
+    # Read first — size may be None until data is fully read
     data = await file.read()
+    if len(data) > MAX_BYTES:
+        raise HTTPException(413, f"File exceeds {settings.MAX_FILE_SIZE_MB} MB limit")
+    if not data:
+        raise HTTPException(422, "Empty file")
+
     try:
         raw   = load_image_from_bytes(data, file.filename or "")
         image = preprocess_image(raw, (settings.IMAGE_SIZE, settings.IMAGE_SIZE))
@@ -58,13 +63,13 @@ async def ingest_image(
     await db.commit()
 
     return {
-        "id":           record_id,
-        "filename":     file.filename,
-        "status":       "pending",
-        "noise_sigma":  round(sigma, 4),
-        "preview":      image_to_base64(image),
-        "stats":        stats,
-        "patient_id":   record.patient_id,
+        "id":          record_id,
+        "filename":    file.filename,
+        "status":      "pending",
+        "noise_sigma": round(sigma, 4),
+        "preview":     image_to_base64(image),
+        "stats":       stats,
+        "patient_id":  record.patient_id,
     }
 
 
@@ -83,18 +88,22 @@ async def list_images(
     records = result.scalars().all()
     return [
         {
-            "id":           r.id,
-            "filename":     r.filename,
-            "status":       r.status,
-            "psnr":         r.psnr,
-            "ssim":         r.ssim,
-            "mse":          r.mse,
-            "noise_sigma":  r.noise_sigma,
-            "diagnosis":    r.diagnosis,
-            "patient_id":   r.patient_id,
-            "pipeline_used":r.pipeline_used,
-            "processing_time_ms": r.processing_time_ms,
-            "created_at":   r.created_at.isoformat() if r.created_at else None,
+            "id":                  r.id,
+            "filename":            r.filename,
+            "status":              r.status,
+            "psnr":                r.psnr,
+            "ssim":                r.ssim,
+            "mse":                 r.mse,
+            "snr":                 r.snr,
+            "noise_sigma":         r.noise_sigma,
+            "diagnosis":           r.diagnosis,
+            "patient_id":          r.patient_id,
+            "width":               r.width,
+            "height":              r.height,
+            "pipeline_used":       r.pipeline_used,
+            "processing_time_ms":  r.processing_time_ms,
+            "noise_intensity_pct": r.noise_intensity_pct,
+            "created_at":          r.created_at.isoformat() if r.created_at else None,
         }
         for r in records
     ]
@@ -106,7 +115,24 @@ async def get_image(image_id: str, db: AsyncSession = Depends(get_db)):
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(404, "Image not found")
-    return record
+    return {
+        "id":                  record.id,
+        "filename":            record.filename,
+        "status":              record.status,
+        "psnr":                record.psnr,
+        "ssim":                record.ssim,
+        "mse":                 record.mse,
+        "snr":                 record.snr,
+        "noise_sigma":         record.noise_sigma,
+        "diagnosis":           record.diagnosis,
+        "patient_id":          record.patient_id,
+        "width":               record.width,
+        "height":              record.height,
+        "pipeline_used":       record.pipeline_used,
+        "processing_time_ms":  record.processing_time_ms,
+        "noise_intensity_pct": record.noise_intensity_pct,
+        "created_at":          record.created_at.isoformat() if record.created_at else None,
+    }
 
 
 @router.delete("/images/{image_id}")
@@ -122,4 +148,5 @@ async def delete_image(image_id: str, db: AsyncSession = Depends(get_db)):
             except OSError:
                 pass
     await db.delete(record)
+    await db.commit()
     return {"deleted": image_id}
