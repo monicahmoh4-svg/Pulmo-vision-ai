@@ -2,10 +2,7 @@
 Database engine — auto-selects driver from DATABASE_URL.
 
 SQLite  (dev):  sqlite+aiosqlite:///./lungdenoise.db
-Neon/PG (prod): postgresql+asyncpg://user:pass@ep-xxx.neon.tech/neondb?sslmode=require
-
-Neon connection strings from Vercel use the postgres:// scheme —
-we normalise them to postgresql+asyncpg:// here.
+Neon/PG (prod): postgresql+asyncpg://user:pass@host/db?sslmode=require
 """
 
 import os
@@ -17,33 +14,30 @@ from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger(__name__)
 
+# psycopg2-style params that asyncpg rejects — must be stripped
+_PSYCOPG2_ONLY = {
+    "sslmode", "sslcert", "sslkey", "sslrootcert", "sslcrl",
+    "connect_timeout", "application_name", "options",
+}
+
 
 def _build_url(raw: str) -> str:
-    """Translate any DATABASE_URL variant to an async-compatible URL."""
     if not raw:
         return "sqlite+aiosqlite:///./lungdenoise.db"
 
-    # Neon / Vercel ships postgres:// — map to asyncpg driver
     if raw.startswith("postgres://"):
         raw = raw.replace("postgres://", "postgresql+asyncpg://", 1)
     elif raw.startswith("postgresql://") and "+asyncpg" not in raw:
         raw = raw.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    # SQLite: keep as-is
     if "sqlite" in raw:
         return raw
 
-    # asyncpg does NOT accept psycopg2-style query params like sslmode, sslcert, etc.
-    # Strip them all out — SSL is handled via connect_args={"ssl": "require"} instead.
     parsed = urlparse(raw)
     if parsed.query:
-        # Remove known psycopg2-only params; keep anything asyncpg understands
-        _PSYCOPG2_ONLY = {"sslmode", "sslcert", "sslkey", "sslrootcert", "sslcrl",
-                          "connect_timeout", "application_name", "options"}
         qs = parse_qs(parsed.query, keep_blank_values=True)
         qs_clean = {k: v for k, v in qs.items() if k not in _PSYCOPG2_ONLY}
-        clean_query = urlencode(qs_clean, doseq=True)
-        parsed = parsed._replace(query=clean_query)
+        parsed = parsed._replace(query=urlencode(qs_clean, doseq=True))
         raw = urlunparse(parsed)
 
     return raw
@@ -55,7 +49,6 @@ _is_pg   = "postgresql" in _db_url
 
 logger.info("Database driver: %s", "PostgreSQL/Neon" if _is_pg else "SQLite")
 
-# PostgreSQL needs NullPool for serverless (Neon hibernates connections)
 engine = create_async_engine(
     _db_url,
     echo=False,
