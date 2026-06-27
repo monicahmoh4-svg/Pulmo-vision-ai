@@ -2,16 +2,124 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/lung.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="LungDenoise AI — Hospital-grade CT image denoising for lung cancer using AGF + Haar Wavelet + DnCNN" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Primary meta -->
     <title>LungDenoise AI | CT Gaussian Noise Removal</title>
+    <meta name="description" content="Hospital-grade CT image denoising for lung cancer using AGF + Haar Wavelet DWT + DnCNN + Total Variation smoothing." />
+    <meta name="keywords"    content="lung CT denoising, DICOM, DnCNN, wavelet, medical imaging AI, radiology" />
+    <meta name="author"      content="LungDenoise AI" />
+
+    <!-- PWA essentials -->
+    <meta name="application-name"   content="LungDenoise AI" />
+    <meta name="theme-color"         content="#0d7377" />
+    <meta name="mobile-web-app-capable"      content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title"  content="LungDenoise" />
+
+    <!-- Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Favicons + Apple icons -->
+    <link rel="icon"             type="image/png"      href="/favicon.png" />
+    <link rel="apple-touch-icon"                       href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" sizes="152x152"       href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="192x192"       href="/icons/icon-192x192.png" />
+
+    <!-- MS Tile (Windows / Edge) -->
+    <meta name="msapplication-TileColor" content="#0d7377" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png" />
+
+    <!-- Open Graph (looks good when shared) -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:title"       content="LungDenoise AI — CT Denoising" />
+    <meta property="og:description" content="Hospital-grade CT image denoising for lung cancer diagnosis." />
+    <meta property="og:image"       content="/icons/icon-512x512.png" />
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+    <style>
+      /* Splash screen shown before React mounts */
+      #splash {
+        position: fixed; inset: 0;
+        background: #0d7377;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 16px; z-index: 9999;
+        transition: opacity .4s ease;
+      }
+      #splash.hidden { opacity: 0; pointer-events: none; }
+      #splash-icon { font-size: 64px; }
+      #splash-title {
+        font-family: Inter, sans-serif;
+        font-size: 22px; font-weight: 700;
+        color: white; letter-spacing: -.3px;
+      }
+      #splash-sub {
+        font-family: Inter, sans-serif;
+        font-size: 13px; color: rgba(255,255,255,.7);
+      }
+      #splash-bar {
+        width: 160px; height: 3px;
+        background: rgba(255,255,255,.2);
+        border-radius: 99px; overflow: hidden;
+      }
+      #splash-fill {
+        height: 100%; width: 0;
+        background: white; border-radius: 99px;
+        animation: splash-load 1.2s ease forwards;
+      }
+      @keyframes splash-load { to { width: 100%; } }
+    </style>
   </head>
   <body>
+    <!-- Splash screen -->
+    <div id="splash">
+      <div id="splash-icon">🫁</div>
+      <div id="splash-title">LungDenoise AI</div>
+      <div id="splash-sub">CT Denoising Pipeline</div>
+      <div id="splash-bar"><div id="splash-fill"></div></div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
+    <script>
+      // Hide splash once React has painted
+      window.__hideSplash = function () {
+        var s = document.getElementById("splash");
+        if (s) { s.classList.add("hidden"); setTimeout(function(){ s.remove(); }, 450); }
+      };
+
+      // Register service worker
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker
+            .register("/sw.js", { scope: "/" })
+            .then(function (reg) {
+              console.log("[PWA] Service worker registered:", reg.scope);
+              // Tell a waiting SW to activate immediately
+              if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+              reg.addEventListener("updatefound", function () {
+                var newSW = reg.installing;
+                if (newSW) {
+                  newSW.addEventListener("statechange", function () {
+                    if (newSW.state === "installed" && navigator.serviceWorker.controller) {
+                      console.log("[PWA] Update available — will activate on next visit");
+                    }
+                  });
+                }
+              });
+            })
+            .catch(function (err) {
+              console.warn("[PWA] Service worker registration failed:", err);
+            });
+        });
+      }
+    </script>
   </body>
 </html>
