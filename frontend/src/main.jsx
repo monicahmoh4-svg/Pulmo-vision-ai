@@ -6,10 +6,10 @@ import { Toaster } from "react-hot-toast";
 
 import "./index.css";
 
-import Layout       from "./components/Layout";
+import Layout        from "./components/Layout";
 import InstallBanner from "./components/InstallBanner";
 
-// Pages — lazy-loaded for fast initial paint
+// Lazy-loaded pages — keeps initial bundle small
 const Dashboard    = React.lazy(() => import("./pages/Dashboard"));
 const Ingest       = React.lazy(() => import("./pages/Ingest"));
 const Denoise      = React.lazy(() => import("./pages/Denoise"));
@@ -22,10 +22,10 @@ const Architecture = React.lazy(() => import("./pages/Architecture"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
-      cacheTime: 300_000,
+      staleTime:           30_000,
+      cacheTime:           300_000,
       refetchOnWindowFocus: false,
-      retry: 1,
+      retry:               1,
     },
   },
 });
@@ -54,14 +54,14 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         <React.Suspense fallback={<Spinner />}>
           <Routes>
             <Route path="/" element={<Layout />}>
-              <Route index           element={<Dashboard    />} />
-              <Route path="ingest"   element={<Ingest       />} />
-              <Route path="denoise"  element={<Denoise      />} />
-              <Route path="evaluation" element={<Evaluation />} />
-              <Route path="radiologist" element={<Radiologist />} />
-              <Route path="batch"    element={<Batch        />} />
-              <Route path="dataset"  element={<Dataset      />} />
-              <Route path="architecture" element={<Architecture />} />
+              <Route index                element={<Dashboard    />} />
+              <Route path="ingest"        element={<Ingest       />} />
+              <Route path="denoise"       element={<Denoise      />} />
+              <Route path="evaluation"    element={<Evaluation   />} />
+              <Route path="radiologist"   element={<Radiologist  />} />
+              <Route path="batch"         element={<Batch        />} />
+              <Route path="dataset"       element={<Dataset      />} />
+              <Route path="architecture"  element={<Architecture />} />
             </Route>
           </Routes>
         </React.Suspense>
@@ -74,13 +74,13 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           toastOptions={{
             duration: 4000,
             style: {
-              background: "#fff",
-              color: "#0f2027",
-              fontSize: "12px",
-              fontWeight: 500,
-              border: "1px solid #e2e8ec",
+              background:   "#fff",
+              color:        "#0f2027",
+              fontSize:     "12px",
+              fontWeight:   500,
+              border:       "1px solid #e2e8ec",
               borderRadius: "12px",
-              boxShadow: "0 4px 16px rgba(13,115,119,.12)",
+              boxShadow:    "0 4px 16px rgba(13,115,119,.12)",
             },
             success: { iconTheme: { primary: "#2d8c5c", secondary: "#fff" } },
             error:   { iconTheme: { primary: "#c0392b", secondary: "#fff" } },
@@ -91,7 +91,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </React.StrictMode>
 );
 
-// Hide splash screen after React's first paint
+// Hide splash screen after React first paint
 requestAnimationFrame(() => {
   setTimeout(() => {
     if (window.__hideSplash) window.__hideSplash();
