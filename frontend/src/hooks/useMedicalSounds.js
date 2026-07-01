@@ -1,23 +1,19 @@
 /**
- * useMedicalSounds
+ * useMedicalSounds — Professional Medical Equipment Audio
  *
- * Generates all sounds programmatically using the Web Audio API —
- * zero external files needed, works offline, instant load.
+ * All sounds modelled after real clinical imaging equipment:
+ * Siemens SOMATOM, GE Revolution, Philips Brilliance CT scanners.
  *
- * Sounds modelled after real medical imaging equipment:
- *  - CT scanner hum / ramp-up
- *  - Acquisition beep sequences
- *  - Gantry rotation
- *  - Processing / computation tones
- *  - Success chime
- *  - Alert / warning
- *  - Upload confirmation
- *  - Heartbeat monitor
+ * Design principles:
+ *  - Low gain (0.04–0.10 max) — never startling
+ *  - Short duration (50–400 ms) — non-intrusive
+ *  - Sine/triangle oscillators only — smooth, clinical
+ *  - Gentle attack + long release — professional feel
+ *  - Frequency range 300–1200 Hz — sits in background
  */
 
 import { useRef, useCallback, useEffect } from "react";
 
-/* ── Audio context singleton ─────────────────────────────────────── */
 let _ctx = null;
 function getCtx() {
   if (!_ctx || _ctx.state === "closed") {
@@ -27,361 +23,234 @@ function getCtx() {
   return _ctx;
 }
 
-/* ── Low-level helpers ───────────────────────────────────────────── */
-function osc(ctx, type, freq, start, dur, gainVal = 0.18, fadeOut = true) {
+/* ── Core tone builder ───────────────────────────────────────────
+   gainVal kept deliberately low (0.04–0.10).
+   Attack always ≥ 20 ms to avoid clicks.
+   Release always exponential for natural decay.
+*/
+function tone(ctx, freq, start, dur, gainVal = 0.06, type = "sine") {
   const o = ctx.createOscillator();
   const g = ctx.createGain();
-  o.connect(g); g.connect(ctx.destination);
+  // Soft low-pass so no harsh high harmonics
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 2200;
+  o.connect(lp); lp.connect(g); g.connect(ctx.destination);
   o.type = type;
   o.frequency.setValueAtTime(freq, start);
   g.gain.setValueAtTime(0, start);
-  g.gain.linearRampToValueAtTime(gainVal, start + 0.01);
-  if (fadeOut) g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-  else         g.gain.setValueAtTime(gainVal, start + dur);
+  g.gain.linearRampToValueAtTime(gainVal, start + 0.022); // 22 ms attack
+  g.gain.setValueAtTime(gainVal, start + dur * 0.6);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
   o.start(start);
   o.stop(start + dur + 0.01);
-  return { osc: o, gain: g };
 }
 
-function noise(ctx, start, dur, gainVal = 0.06, lpFreq = 800) {
-  const bufSize = ctx.sampleRate * dur;
-  const buf     = ctx.createBuffer(1, bufSize, ctx.sampleRate);
-  const data    = buf.getChannelData(0);
-  for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+/* Single very quiet click — mechanical relay feel */
+function click(ctx, start) {
+  const buf  = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.018), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (data.length * 0.3));
+  }
   const src = ctx.createBufferSource();
   src.buffer = buf;
-  const lp = ctx.createBiquadFilter();
-  lp.type = "lowpass"; lp.frequency.value = lpFreq;
   const g = ctx.createGain();
-  src.connect(lp); lp.connect(g); g.connect(ctx.destination);
-  g.gain.setValueAtTime(0, start);
-  g.gain.linearRampToValueAtTime(gainVal, start + 0.05);
-  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-  src.start(start); src.stop(start + dur + 0.01);
+  src.connect(g); g.connect(ctx.destination);
+  g.gain.setValueAtTime(0.05, start);
+  src.start(start);
 }
 
-/* ══════════════════════════════════════════════════════════════════
-   SOUND LIBRARY
-══════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   SOUND DEFINITIONS
+═══════════════════════════════════════════════════════════════ */
 
 /**
- * CT Scanner startup — motor ramp-up hum + rotation whoosh
- * Heard when the denoising pipeline begins.
+ * CT Scanner ready beep — single soft 880 Hz sine, 200 ms.
+ * Like the "ready" indicator on a Siemens SOMATOM before acquisition.
  */
 function playCTStartup(ctx) {
   const t = ctx.currentTime;
-
-  // Low motor hum ramping up (like gantry motor engaging)
-  const hum = ctx.createOscillator();
-  const humG = ctx.createGain();
-  hum.connect(humG); humG.connect(ctx.destination);
-  hum.type = "sawtooth";
-  hum.frequency.setValueAtTime(38, t);
-  hum.frequency.linearRampToValueAtTime(72, t + 1.8);
-  humG.gain.setValueAtTime(0, t);
-  humG.gain.linearRampToValueAtTime(0.12, t + 0.3);
-  humG.gain.setValueAtTime(0.12, t + 1.5);
-  humG.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
-  hum.start(t); hum.stop(t + 2.3);
-
-  // High-frequency gantry rotation whoosh
-  const whoosh = ctx.createOscillator();
-  const whooshG = ctx.createGain();
-  const whooshLp = ctx.createBiquadFilter();
-  whooshLp.type = "bandpass"; whooshLp.frequency.value = 420; whooshLp.Q.value = 0.8;
-  whoosh.connect(whooshLp); whooshLp.connect(whooshG); whooshG.connect(ctx.destination);
-  whoosh.type = "sawtooth";
-  whoosh.frequency.setValueAtTime(180, t + 0.2);
-  whoosh.frequency.linearRampToValueAtTime(340, t + 1.4);
-  whooshG.gain.setValueAtTime(0, t + 0.2);
-  whooshG.gain.linearRampToValueAtTime(0.09, t + 0.5);
-  whooshG.gain.exponentialRampToValueAtTime(0.0001, t + 2.0);
-  whoosh.start(t + 0.2); whoosh.stop(t + 2.1);
-
-  // Three acquisition beeps (prep beeps before scan)
-  [0.6, 0.95, 1.3].forEach(delay => {
-    osc(ctx, "sine", 880, t + delay, 0.08, 0.15);
-    osc(ctx, "sine", 1320, t + delay + 0.01, 0.06, 0.06, 0.07);
-  });
-
-  // White noise burst (X-ray emission simulation)
-  noise(ctx, t + 1.5, 0.6, 0.08, 1200);
+  // Ready tone
+  tone(ctx, 880, t, 0.20, 0.07);
+  // Very faint sub-tone (adds depth without loudness)
+  tone(ctx, 440, t, 0.28, 0.03);
 }
 
 /**
- * Pipeline step tick — soft mechanical click heard at each processing stage
+ * Step tick — subtle mechanical click, like a relay engaging.
+ * Under 20 ms. Almost subconscious.
  */
 function playStepTick(ctx) {
-  const t = ctx.currentTime;
-  // Mechanical click body
-  noise(ctx, t, 0.04, 0.12, 3000);
-  // High transient
-  osc(ctx, "square", 2200, t, 0.025, 0.08);
-  // Low thump
-  osc(ctx, "sine", 80, t, 0.06, 0.1);
+  click(ctx, ctx.currentTime);
 }
 
 /**
- * Wavelet transform sound — cascading descending tones like
- * a spectrogram decomposition
+ * Wavelet transform — two soft descending tones, 80 ms apart.
+ * Represents frequency decomposition. Very quiet.
  */
 function playWavelet(ctx) {
   const t = ctx.currentTime;
-  // LL, LH, HL, HH sub-band tones (descending freq = lower sub-bands)
-  const freqs = [1200, 900, 650, 480, 340, 220];
-  freqs.forEach((f, i) => {
-    osc(ctx, "triangle", f, t + i * 0.07, 0.18, 0.10);
-    // Harmonic
-    osc(ctx, "sine", f * 1.5, t + i * 0.07, 0.12, 0.06, true);
-  });
-  // Underlying computation hum
-  osc(ctx, "sawtooth", 55, t, 0.45, 0.05);
+  tone(ctx, 660, t,        0.12, 0.05);
+  tone(ctx, 495, t + 0.08, 0.12, 0.04);
 }
 
 /**
- * DnCNN inference sound — rapid neural network "thinking"
- * bursts like GPU computation ticking
+ * DnCNN inference — a single clean processing tone at 720 Hz.
+ * Like a quiet computation indicator on a workstation.
  */
 function playNeuralNet(ctx) {
   const t = ctx.currentTime;
-  const totalLayers = 17;
-
-  for (let layer = 0; layer < totalLayers; layer++) {
-    const lt   = t + layer * 0.045;
-    const freq = 300 + layer * 28;
-    osc(ctx, "square", freq, lt, 0.03, 0.04);
-    if (layer % 3 === 0) noise(ctx, lt, 0.02, 0.03, 2000);
-  }
-
-  // BatchNorm sweep (smooth sine glide)
-  const bn = ctx.createOscillator();
-  const bnG = ctx.createGain();
-  bn.connect(bnG); bnG.connect(ctx.destination);
-  bn.type = "sine";
-  bn.frequency.setValueAtTime(200, t + 0.1);
-  bn.frequency.exponentialRampToValueAtTime(800, t + 0.8);
-  bnG.gain.setValueAtTime(0, t + 0.1);
-  bnG.gain.linearRampToValueAtTime(0.06, t + 0.2);
-  bnG.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
-  bn.start(t + 0.1); bn.stop(t + 0.9);
+  tone(ctx, 720, t, 0.18, 0.05);
+  tone(ctx, 540, t + 0.06, 0.14, 0.03);
 }
 
 /**
- * Total Variation smoothing — a soft smooth "wash" sound
- * like signal being cleaned
+ * TV smoothing — one gentle descending tone.
+ * 880 → 660 Hz glide, 250 ms. Signals completion of smoothing.
  */
 function playTVSmooth(ctx) {
   const t = ctx.currentTime;
-
-  // Smooth sine sweep (high → low = smoothing)
-  const s = ctx.createOscillator();
+  const o = ctx.createOscillator();
   const g = ctx.createGain();
-  s.connect(g); g.connect(ctx.destination);
-  s.type = "sine";
-  s.frequency.setValueAtTime(1400, t);
-  s.frequency.exponentialRampToValueAtTime(180, t + 0.7);
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 1800;
+  o.connect(lp); lp.connect(g); g.connect(ctx.destination);
+  o.type = "sine";
+  o.frequency.setValueAtTime(880, t);
+  o.frequency.linearRampToValueAtTime(660, t + 0.25);
   g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(0.10, t + 0.08);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
-  s.start(t); s.stop(t + 0.8);
-
-  // Subtle white noise fade (residual artifact removal)
-  noise(ctx, t, 0.5, 0.04, 600);
+  g.gain.linearRampToValueAtTime(0.055, t + 0.025);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.30);
+  o.start(t); o.stop(t + 0.32);
 }
 
 /**
- * Success chime — warm clinical success tone (pipeline complete)
- * Three ascending notes like a medical monitor confirmation
+ * Pipeline success — two-note ascending chime.
+ * G5 then C6, 150 ms apart. Clean and professional.
+ * Like the "exam complete" tone on clinical scanners.
  */
 function playSuccess(ctx) {
   const t = ctx.currentTime;
-  // Ascending triad: C5 E5 G5
-  [523.25, 659.25, 783.99].forEach((f, i) => {
-    const st = t + i * 0.14;
-    osc(ctx, "sine",     f,       st, 0.5,  0.18);
-    osc(ctx, "triangle", f * 2,   st, 0.25, 0.06);
-    osc(ctx, "sine",     f * 0.5, st, 0.4,  0.04);
-  });
-  // Final sustain chord
-  [523.25, 659.25, 783.99].forEach(f => {
-    osc(ctx, "sine", f, t + 0.45, 0.8, 0.07, true);
-  });
+  tone(ctx, 784, t,        0.35, 0.07); // G5
+  tone(ctx, 1047, t + 0.15, 0.45, 0.07); // C6
+  // Very faint harmonic warmth
+  tone(ctx, 523, t + 0.15, 0.40, 0.025); // C5 sub
 }
 
 /**
- * Alert / warning — urgent double beep like a clinical alarm
+ * Alert — two short low tones. Not alarming, just a soft notice.
+ * Like a missed-step indicator on a Philips workstation.
  */
 function playAlert(ctx) {
   const t = ctx.currentTime;
-  [0, 0.22, 0.44].forEach(d => {
-    osc(ctx, "square", 660, t + d, 0.12, 0.14);
-    osc(ctx, "square", 990, t + d, 0.12, 0.07, true);
-  });
+  tone(ctx, 440, t,       0.12, 0.07);
+  tone(ctx, 370, t + 0.14, 0.14, 0.06);
 }
 
 /**
- * Upload complete — soft two-tone confirmation like
- * data received by a PACS system
+ * Upload complete — single soft ascending two-tone.
+ * Like data confirmation on a PACS system.
  */
 function playUploadDone(ctx) {
   const t = ctx.currentTime;
-  osc(ctx, "sine", 440, t,        0.18, 0.12);
-  osc(ctx, "sine", 660, t + 0.15, 0.22, 0.14);
-  // Subtle chime harmonic
-  osc(ctx, "triangle", 1320, t + 0.15, 0.18, 0.06);
+  tone(ctx, 660, t,        0.16, 0.06);
+  tone(ctx, 880, t + 0.12, 0.20, 0.06);
 }
 
 /**
- * Scan line — repeating tick used during CT acquisition animation
- * (call repeatedly with setInterval)
+ * Scan tick — used during the scan-line animation.
+ * Single very quiet click. Barely audible — ambient feel.
  */
 function playScanTick(ctx) {
   const t = ctx.currentTime;
-  noise(ctx, t, 0.025, 0.08, 4000);
-  osc(ctx, "sine", 3200, t, 0.025, 0.07);
+  // Soft sine pulse, 30 ms
+  tone(ctx, 1100, t, 0.03, 0.025);
 }
 
 /**
- * Heartbeat monitor — classic ECG beep used in radiologist view
+ * Heartbeat — a minimal two-pulse ECG simulation.
+ * Very quiet and natural-sounding.
  */
 function playHeartbeat(ctx) {
   const t = ctx.currentTime;
-  // QRS complex: quick rise + fall
-  osc(ctx, "sine", 880, t,       0.04, 0.18);
-  osc(ctx, "sine", 660, t + 0.04,0.08, 0.10);
-  // Subtle low thump
-  osc(ctx, "sine", 55,  t,       0.12, 0.09);
+  // S1 (lub)
+  tone(ctx, 80,  t,        0.07, 0.045);
+  tone(ctx, 120, t,        0.05, 0.030);
+  // S2 (dub) — slightly higher, 160 ms later
+  tone(ctx, 95,  t + 0.16, 0.05, 0.035);
+  tone(ctx, 140, t + 0.16, 0.04, 0.025);
 }
 
 /**
- * DICOM export — a crisp data-transfer bleep sequence
+ * Export / download — soft data-transfer confirmation.
+ * Three ascending clicks, 60 ms apart.
  */
 function playExport(ctx) {
   const t = ctx.currentTime;
-  const freqs = [880, 1100, 880, 1320];
-  freqs.forEach((f, i) => osc(ctx, "sine", f, t + i * 0.06, 0.05, 0.12));
+  [660, 784, 880].forEach((f, i) => tone(ctx, f, t + i * 0.06, 0.10, 0.05));
 }
 
 /**
- * Image accepted — warm positive tone for "Accept Denoised Image"
+ * Image accepted — clean two-note approval tone.
+ * Like the "image stored" confirmation on a GE scanner.
  */
 function playAccepted(ctx) {
   const t = ctx.currentTime;
-  // Major chord arpeggio
-  [261.63, 329.63, 392.00, 523.25].forEach((f, i) => {
-    osc(ctx, "sine",     f,     t + i * 0.09, 0.4 - i * 0.05, 0.14);
-    osc(ctx, "triangle", f * 2, t + i * 0.09, 0.2,             0.05);
-  });
+  tone(ctx, 523, t,        0.25, 0.07); // C5
+  tone(ctx, 659, t + 0.14, 0.35, 0.07); // E5
+  tone(ctx, 784, t + 0.28, 0.40, 0.06); // G5
 }
 
-/* ══════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    HOOK
-══════════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════════════ */
 export function useMedicalSounds() {
-  const scanIntervalRef = useRef(null);
+  const scanIntervalRef  = useRef(null);
   const heartIntervalRef = useRef(null);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (scanIntervalRef.current)  clearInterval(scanIntervalRef.current);
-      if (heartIntervalRef.current) clearInterval(heartIntervalRef.current);
-    };
+  useEffect(() => () => {
+    clearInterval(scanIntervalRef.current);
+    clearInterval(heartIntervalRef.current);
   }, []);
 
   const safe = useCallback((fn) => {
-    try {
-      const ctx = getCtx();
-      fn(ctx);
-    } catch (e) {
-      // Browser may block audio without user gesture — fail silently
-      console.debug("[MedSound] blocked:", e.message);
-    }
+    try { fn(getCtx()); }
+    catch (e) { console.debug("[MedSound]", e.message); }
   }, []);
 
-  /* Individual sound triggers */
-  const sounds = {
-    /** Call when "Run Denoising Pipeline" is clicked */
-    ctStartup:   useCallback(() => safe(playCTStartup),  [safe]),
+  return {
+    ctStartup:  useCallback(() => safe(playCTStartup),  [safe]),
+    stepTick:   useCallback(() => safe(playStepTick),   [safe]),
+    wavelet:    useCallback(() => safe(playWavelet),     [safe]),
+    neuralNet:  useCallback(() => safe(playNeuralNet),  [safe]),
+    tvSmooth:   useCallback(() => safe(playTVSmooth),   [safe]),
+    success:    useCallback(() => safe(playSuccess),     [safe]),
+    alert:      useCallback(() => safe(playAlert),       [safe]),
+    uploadDone: useCallback(() => safe(playUploadDone), [safe]),
+    scanTick:   useCallback(() => safe(playScanTick),   [safe]),
+    heartbeat:  useCallback(() => safe(playHeartbeat),  [safe]),
+    exportDone: useCallback(() => safe(playExport),      [safe]),
+    accepted:   useCallback(() => safe(playAccepted),   [safe]),
 
-    /** Call at each pipeline step transition */
-    stepTick:    useCallback(() => safe(playStepTick),   [safe]),
-
-    /** Call when wavelet DWT stage runs */
-    wavelet:     useCallback(() => safe(playWavelet),    [safe]),
-
-    /** Call when DnCNN inference stage runs */
-    neuralNet:   useCallback(() => safe(playNeuralNet),  [safe]),
-
-    /** Call when TV smoothing stage runs */
-    tvSmooth:    useCallback(() => safe(playTVSmooth),   [safe]),
-
-    /** Call when pipeline completes successfully */
-    success:     useCallback(() => safe(playSuccess),    [safe]),
-
-    /** Call on error / re-process request */
-    alert:       useCallback(() => safe(playAlert),      [safe]),
-
-    /** Call when file upload completes */
-    uploadDone:  useCallback(() => safe(playUploadDone), [safe]),
-
-    /** Single scan tick (for use in an interval) */
-    scanTick:    useCallback(() => safe(playScanTick),   [safe]),
-
-    /** Single heartbeat beep */
-    heartbeat:   useCallback(() => safe(playHeartbeat),  [safe]),
-
-    /** Call when exporting DICOM / PDF */
-    exportDone:  useCallback(() => safe(playExport),     [safe]),
-
-    /** Call when "Accept Denoised Image" is clicked */
-    accepted:    useCallback(() => safe(playAccepted),   [safe]),
-
-    /**
-     * Start repeating scan ticks during CT acquisition animation.
-     * Returns a stop function.
-     */
-    startScanLoop: useCallback((intervalMs = 180) => {
-      if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+    startScanLoop: useCallback((ms = 220) => {
+      clearInterval(scanIntervalRef.current);
       safe(playScanTick);
-      scanIntervalRef.current = setInterval(() => safe(playScanTick), intervalMs);
-      return () => {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      };
+      scanIntervalRef.current = setInterval(() => safe(playScanTick), ms);
+      return () => clearInterval(scanIntervalRef.current);
     }, [safe]),
 
-    stopScanLoop: useCallback(() => {
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-        scanIntervalRef.current = null;
-      }
-    }, []),
+    stopScanLoop: useCallback(() => clearInterval(scanIntervalRef.current), []),
 
-    /**
-     * Start heartbeat monitor loop (for radiologist view).
-     * Returns a stop function.
-     */
     startHeartbeat: useCallback((bpm = 68) => {
-      if (heartIntervalRef.current) clearInterval(heartIntervalRef.current);
+      clearInterval(heartIntervalRef.current);
       safe(playHeartbeat);
       heartIntervalRef.current = setInterval(
-        () => safe(playHeartbeat),
-        Math.round(60000 / bpm)
+        () => safe(playHeartbeat), Math.round(60000 / bpm)
       );
-      return () => {
-        clearInterval(heartIntervalRef.current);
-        heartIntervalRef.current = null;
-      };
+      return () => clearInterval(heartIntervalRef.current);
     }, [safe]),
 
-    stopHeartbeat: useCallback(() => {
-      if (heartIntervalRef.current) {
-        clearInterval(heartIntervalRef.current);
-        heartIntervalRef.current = null;
-      }
-    }, []),
+    stopHeartbeat: useCallback(() => clearInterval(heartIntervalRef.current), []),
   };
-
-  return sounds;
 }
