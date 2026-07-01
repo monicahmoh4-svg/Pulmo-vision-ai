@@ -8,6 +8,7 @@ import {
 import clsx from "clsx";
 import { useQuery } from "react-query";
 import { apiHealth } from "../utils/api";
+import SoundToggle from "./SoundToggle";
 
 const NAV = [
   {
@@ -264,6 +265,7 @@ export default function Layout() {
             <span className="tag tag-green text-[10px] hidden xl:inline-flex">
               <Zap size={9} /> PSNR 34.76 dB
             </span>
+            <SoundToggle />
           </div>
         </header>
 
