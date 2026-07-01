@@ -7,6 +7,8 @@ import {
 import toast from "react-hot-toast";
 import clsx from "clsx";
 import { apiUploadImage, apiNoiseAnalysis } from "../utils/api";
+import { useMedicalSounds } from "../hooks/useMedicalSounds";
+import { isSoundEnabled }   from "../components/SoundToggle";
 
 const T = "#0d7377";
 const G = "#2d8c5c";
@@ -16,6 +18,9 @@ export default function Ingest() {
   const [patientId, setPatientId] = useState("");
   const [diagnosis, setDiagnosis] = useState("unknown");
   const [noiseAnalysis, setNoiseAnalysis] = useState(null);
+
+  const sounds = useMedicalSounds();
+  const snd = (fn) => { if (isSoundEnabled()) fn(); };
 
   // Plain ref to the hidden native <input type="file"> — most reliable cross-browser
   const fileInputRef = useRef(null);
@@ -78,13 +83,15 @@ export default function Ingest() {
               preview: data.preview ? `data:image/png;base64,${data.preview}` : null }
           : f
       ));
+      snd(sounds.uploadDone);
       toast.success(`✓ ${item.file.name} — σ = ${data.noise_sigma}`);
       try {
         const na = await apiNoiseAnalysis(data.id);
         setNoiseAnalysis(na.data);
       } catch { /* best-effort */ }
     } catch {
-      setFiles(p => p.map(f => f.id === item.id ? { ...f, status: "error" } : f));
+      snd(sounds.alert);
+            setFiles(p => p.map(f => f.id === item.id ? { ...f, status: "error" } : f));
     }
   };
 
