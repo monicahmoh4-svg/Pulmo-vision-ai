@@ -11,6 +11,8 @@ import {
 import toast from "react-hot-toast";
 import clsx from "clsx";
 import { apiListImages, apiDenoiseImage, apiPreview, apiDownloadDenoised } from "../utils/api";
+import { useMedicalSounds } from "../hooks/useMedicalSounds";
+import { isSoundEnabled }   from "../components/SoundToggle";
 
 const T = "#0d7377"; const G = "#2d8c5c"; const A = "#c47d1e"; const R = "#c0392b";
 
@@ -131,6 +133,10 @@ export default function Denoise() {
   const [prevLoading, setPrevLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("pipeline"); // pipeline | results | examples
 
+  // Medical sounds
+  const sounds = useMedicalSounds();
+  const snd = (fn) => { if (isSoundEnabled()) fn(); };
+
   const { data: images = [] } = useQuery(
     "images",
     () => apiListImages(100).then(r => r.data),
@@ -138,12 +144,25 @@ export default function Denoise() {
   );
 
   const runPipeline = async () => {
-    if (!selId) { toast.error("Select an uploaded image first"); return; }
+    if (!selId) { toast.error("Select an uploaded image first"); snd(sounds.alert); return; }
     setRunning(true); setStepIdx(0); setResult(null); setActiveTab("pipeline");
+
+    // CT scanner startup sound — motor ramp + acquisition beeps
+    snd(sounds.ctStartup);
 
     const animDone = (async () => {
       for (let i = 0; i < STEPS.length; i++) {
         setStepIdx(i);
+        // Stage-specific sounds
+        if (i === 0) snd(sounds.stepTick);                        // Load & preprocess
+        if (i === 1) setTimeout(() => snd(sounds.stepTick), 60);  // Noise estimation
+        if (i === 2) setTimeout(() => snd(sounds.stepTick), 80);  // AGF
+        if (i === 3) setTimeout(() => snd(sounds.wavelet),  100); // Haar DWT
+        if (i === 4) setTimeout(() => snd(sounds.stepTick), 80);  // BayesShrink
+        if (i === 5) setTimeout(() => snd(sounds.neuralNet),120); // DnCNN 17-layer
+        if (i === 6) setTimeout(() => snd(sounds.stepTick), 60);  // IDWT
+        if (i === 7) setTimeout(() => snd(sounds.tvSmooth), 100); // TV smoothing
+        if (i === 8) setTimeout(() => snd(sounds.stepTick), 60);  // Metrics
         await new Promise(r => setTimeout(r, 370));
       }
     })();
@@ -154,20 +173,25 @@ export default function Denoise() {
       setResult(res.data);
       setStepIdx(STEPS.length);
       setActiveTab("results");
+      // Pipeline complete — success chime
+      setTimeout(() => snd(sounds.success), 200);
       toast.success(`Done — PSNR: ${res.data.metrics?.psnr?.toFixed(2)} dB · SSIM: ${res.data.metrics?.ssim?.toFixed(4)}`);
     } catch {
       await animDone;
       setStepIdx(-1);
+      snd(sounds.alert);
     }
     setRunning(false);
   };
 
   const loadPreview = async () => {
     setPrevLoading(true);
+    snd(sounds.ctStartup);
     try {
       const r = await apiPreview(cfg.noise_intensity_pct, 0.15, cfg.threshold, cfg.threshold_method);
       setPreview(r.data);
-    } catch { toast.error("Preview failed"); }
+      setTimeout(() => snd(sounds.success), 400);
+    } catch { toast.error("Preview failed"); snd(sounds.alert); }
     setPrevLoading(false);
   };
 
