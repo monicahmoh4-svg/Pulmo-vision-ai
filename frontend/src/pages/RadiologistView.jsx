@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { apiListImages } from "../utils/api";
+import { useMedicalSounds } from "../hooks/useMedicalSounds";
+import { isSoundEnabled }   from "../components/SoundToggle";
 
 const T = "#0d7377"; const G = "#2d8c5c"; const A = "#c47d1e"; const R = "#c0392b";
 
@@ -122,6 +124,15 @@ export default function RadiologistView() {
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast]     = useState(100);
   const [expanded, setExpanded]     = useState(null); // metric key expanded in panel
+
+  const sounds = useMedicalSounds();
+  const snd = (fn) => { if (isSoundEnabled()) fn(); };
+
+  // Heartbeat monitor — plays once on page load, not on loop (non-intrusive)
+  useEffect(() => {
+    const t = setTimeout(() => snd(sounds.heartbeat), 800);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line
 
   const { data: images = [] } = useQuery(
     "images",
@@ -343,13 +354,13 @@ export default function RadiologistView() {
 
           {/* Actions */}
           <div className="space-y-2">
-            <button onClick={()=>setAccepted(true)} className="btn btn-primary w-full justify-center">
+            <button onClick={()=>{ setAccepted(true); snd(sounds.accepted); }} className="btn btn-primary w-full justify-center">
               <CheckCircle size={14}/> Accept Denoised Image
             </button>
             <button className="btn w-full justify-center" style={{ color:A, borderColor:A }}>
               <AlertTriangle size={14}/> Request Re-process
             </button>
-            <button className="btn w-full justify-center">
+            <button className="btn w-full justify-center" onClick={()=>snd(sounds.exportDone)}>
               <Download size={14}/> Download Report PDF
             </button>
           </div>
