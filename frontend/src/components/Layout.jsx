@@ -3,7 +3,7 @@ import { Outlet, NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Upload, Wand2, BarChart3, Eye,
   Layers, Database, GitBranch, Activity, Wifi, WifiOff,
-  FlaskConical, Menu, X, Zap, Moon, Sun as SunIcon,
+  FlaskConical, Menu, X, Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { useQuery } from "react-query";
