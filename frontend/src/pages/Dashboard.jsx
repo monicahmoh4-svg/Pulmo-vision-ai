@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "react-query";
 import { Link } from "react-router-dom";
 import {
@@ -9,11 +10,80 @@ import {
   Tooltip, ResponsiveContainer,
 } from "recharts";
 import { apiHealth, apiAggregateMetrics, apiListImages } from "../utils/api";
-import AnimatedNumber from "../components/AnimatedNumber";
-import PageHeader     from "../components/PageHeader";
 
 const T = "#0d7377"; const G = "#2d8c5c"; const A = "#c47d1e";
 
+/* ── Inline AnimatedNumber ──────────────────────────────────────── */
+function AnimatedNumber({ value, duration = 1200, decimals = 2, suffix = "", style = {} }) {
+  const [display, setDisplay] = useState(0);
+  const rafRef   = useRef(null);
+  const startRef = useRef(null);
+  const fromRef  = useRef(0);
+
+  useEffect(() => {
+    const target = Number(value);
+    if (isNaN(target)) return;
+    const from = fromRef.current;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    startRef.current = null;
+    const animate = (ts) => {
+      if (!startRef.current) startRef.current = ts;
+      const progress = Math.min((ts - startRef.current) / duration, 1);
+      const eased    = 1 - Math.pow(1 - progress, 3);
+      setDisplay(from + (target - from) * eased);
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(animate);
+      } else {
+        fromRef.current = target;
+      }
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [value, duration]);
+
+  return (
+    <span className="metric-value" style={style}>
+      {Number(display).toFixed(decimals)}{suffix}
+    </span>
+  );
+}
+
+/* ── Inline PageHeader ──────────────────────────────────────────── */
+function PageHeader({ title, subtitle, icon }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setVisible(true), 30); return () => clearTimeout(t); }, []);
+  return (
+    <div className="mb-5" style={{
+      opacity: visible ? 1 : 0,
+      transform: visible ? "none" : "translateY(14px)",
+      transition: "all 0.45s cubic-bezier(0.34,1.56,0.64,1)",
+    }}>
+      <div className="flex items-center gap-2.5 mb-1">
+        {icon && <span className="text-2xl animate-float">{icon}</span>}
+        <h2 className="text-xl font-bold" style={{
+          background: "linear-gradient(135deg, var(--c-text) 0%, var(--c-primary) 100%)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
+        }}>{title}</h2>
+      </div>
+      {subtitle && (
+        <p className="text-xs" style={{
+          color: "var(--c-text3)",
+          opacity: visible ? 1 : 0,
+          transform: visible ? "none" : "translateY(6px)",
+          transition: "all 0.4s ease 150ms",
+        }}>{subtitle}</p>
+      )}
+      <div style={{
+        height: 2, borderRadius: 99, marginTop: 6,
+        width: visible ? "100%" : "0%",
+        background: "linear-gradient(90deg, var(--c-primary), var(--c-secondary))",
+        transition: "width 0.7s ease 100ms",
+      }} />
+    </div>
+  );
+}
+
+/* ── Data ───────────────────────────────────────────────────────── */
 const PAPER_RESULTS = [
   { noise:"5%",  psnr:34.76, ssim:1.0000, mse:26.46,  snr:18.69 },
   { noise:"10%", psnr:31.68, ssim:1.0000, mse:70.99,  snr:15.46 },
@@ -24,19 +94,20 @@ const PAPER_RESULTS = [
 ];
 
 const PIPELINE_STEPS = [
-  { to:"/ingest",      icon:Upload,    label:"Ingest CT Scan",         sub:"Upload DICOM / PNG / JPG",      color:T, delay:0   },
-  { to:"/denoise",     icon:Wand2,     label:"Denoise Pipeline",        sub:"AGF + Haar DWT + DnCNN + TV",  color:G, delay:80  },
-  { to:"/evaluation",  icon:BarChart3, label:"Evaluate Quality",        sub:"PSNR · SSIM · MSE · SNR",      color:T, delay:160 },
-  { to:"/radiologist", icon:Eye,       label:"Radiologist Review",      sub:"Accept · Annotate · Export",   color:G, delay:240 },
+  { to:"/ingest",      icon:Upload,    label:"Ingest CT Scan",     sub:"Upload DICOM / PNG / JPG",     color:T, delay:0   },
+  { to:"/denoise",     icon:Wand2,     label:"Denoise Pipeline",   sub:"AGF + Haar DWT + DnCNN + TV",  color:G, delay:80  },
+  { to:"/evaluation",  icon:BarChart3, label:"Evaluate Quality",   sub:"PSNR · SSIM · MSE · SNR",      color:T, delay:160 },
+  { to:"/radiologist", icon:Eye,       label:"Radiologist Review", sub:"Accept · Annotate · Export",   color:G, delay:240 },
 ];
 
 const PIPELINE_STAGES = [
-  { icon:"🌀", label:"AGF",          sub:"Anisotropic Gaussian Filter",     color:T },
-  { icon:"📊", label:"Haar DWT L2",  sub:"BayesShrink thresholding",         color:G },
-  { icon:"🧠", label:"DnCNN",        sub:"17-layer CNN · 64 filters",        color:T },
-  { icon:"✨", label:"TV Smoothing", sub:"Chambolle TV · artifact removal",  color:G },
+  { icon:"🌀", label:"AGF",           sub:"Anisotropic Gaussian Filter",    color:T },
+  { icon:"📊", label:"Haar DWT L2",   sub:"BayesShrink thresholding",        color:G },
+  { icon:"🧠", label:"DnCNN",         sub:"17-layer CNN · 64 filters",       color:T },
+  { icon:"✨", label:"TV Smoothing",  sub:"Chambolle TV · artifact removal", color:G },
 ];
 
+/* ── Component ──────────────────────────────────────────────────── */
 export default function Dashboard() {
   const { data: health    } = useQuery("health",    () => apiHealth().then(r => r.data),           { refetchInterval:30000, retry:1 });
   const { data: agg       } = useQuery("aggregate", () => apiAggregateMetrics().then(r => r.data), { retry:1, placeholderData:null });
@@ -46,10 +117,10 @@ export default function Dashboard() {
   const apiOk = !!health;
 
   const statCards = [
-    { label:"API Status",          val:apiOk?"Online":"Offline",                 sub:"FastAPI backend",          color:apiOk?G:A, icon:Activity,   anim:false },
-    { label:"Database",            val:dbOk?"Connected":"Disconnected",           sub:health?.database?.type||"—",color:dbOk?G:A,  icon:Database,   anim:false },
-    { label:"Images Processed",    val:agg?.total_images ?? images.length ?? 0,  sub:"In database",              color:T,          icon:CheckCircle,anim:true, dec:0 },
-    { label:"Best PSNR",           val:agg?.avg_psnr ?? 34.76,                   sub:agg?"Live avg":"Paper best",color:T,          icon:TrendingUp, anim:true, dec:2, suffix:" dB" },
+    { label:"API Status",       val:apiOk?"Online":"Offline",              sub:"FastAPI backend",           color:apiOk?G:A, icon:Activity,    anim:false },
+    { label:"Database",         val:dbOk?"Connected":"Disconnected",        sub:health?.database?.type||"—", color:dbOk?G:A,  icon:Database,    anim:false },
+    { label:"Images Processed", val:agg?.total_images ?? images.length ?? 0,sub:"In database",              color:T,          icon:CheckCircle, anim:true, dec:0 },
+    { label:"Best PSNR",        val:agg?.avg_psnr ?? 34.76,                sub:agg?"Live avg":"Paper best", color:T,          icon:TrendingUp,  anim:true, dec:2, suffix:" dB" },
   ];
 
   return (
@@ -60,11 +131,12 @@ export default function Dashboard() {
         subtitle="Hospital-grade CT denoising · AGF + Haar Wavelet DWT + DnCNN + Total Variation · IQ-OTH/NCCD dataset"
       />
 
-      {/* ── Stat cards ─────────────────────────────────── */}
+      {/* ── Stat cards ─────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 stagger">
-        {statCards.map(({ label, val, sub, color, icon: Icon, anim, dec=0, suffix="" }) => (
+        {statCards.map(({ label, val, sub, color, icon: Icon, anim, dec=0, suffix="" }, i) => (
           <div key={label}
-            className="card metric-card card-hover p-3 sm:p-4 animate-fade-up cursor-default">
+            className="card metric-card card-hover p-3 sm:p-4 animate-fade-up cursor-default"
+            style={{ animationDelay:`${i*60}ms` }}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-semibold uppercase tracking-wide"
                 style={{ color:"var(--c-text3)" }}>{label}</span>
@@ -84,7 +156,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* ── Workflow steps ──────────────────────────────── */}
+      {/* ── Workflow steps ──────────────────────────────────── */}
       <div className="card p-4 animate-fade-up delay-150">
         <h2 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color:"var(--c-text)" }}>
           <Zap size={14} style={{ color:T }} /> Clinical Denoising Workflow
@@ -92,26 +164,29 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {PIPELINE_STEPS.map(({ to, icon:Icon, label, sub, color, delay }, i) => (
             <Link key={to} to={to}
-              className="group rounded-xl p-3 sm:p-4 border-2 flex flex-col gap-2 card-hover animate-scale-in"
+              className="group rounded-xl p-3 sm:p-4 border-2 flex flex-col gap-2 animate-scale-in"
               style={{
                 borderColor:"var(--c-border)", background:"var(--c-surface3)",
                 animationDelay:`${delay}ms`,
-                transition:"all var(--dur-base) var(--ease-smooth)",
+                transition:"all 250ms cubic-bezier(0.25,0.46,0.45,0.94)",
+                textDecoration:"none",
               }}
               onMouseEnter={e => {
                 e.currentTarget.style.borderColor = color;
                 e.currentTarget.style.background  = `${color}08`;
+                e.currentTarget.style.transform   = "translateY(-2px)";
                 e.currentTarget.style.boxShadow   = `0 6px 24px ${color}22`;
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.borderColor = "var(--c-border)";
                 e.currentTarget.style.background  = "var(--c-surface3)";
+                e.currentTarget.style.transform   = "";
                 e.currentTarget.style.boxShadow   = "";
               }}
             >
               <div className="flex items-center justify-between">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center transition-all group-hover:scale-110"
-                  style={{ background:`${color}18` }}>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+                  style={{ background:`${color}18`, transition:"transform 200ms" }}>
                   <Icon size={16} style={{ color }} />
                 </div>
                 <span className="text-[11px] font-bold rounded-full px-2 py-0.5"
@@ -121,7 +196,7 @@ export default function Dashboard() {
                 <div className="text-xs font-bold" style={{ color:"var(--c-text)" }}>{label}</div>
                 <div className="text-[10px] mt-0.5" style={{ color:"var(--c-text3)" }}>{sub}</div>
               </div>
-              <div className="flex items-center gap-1 text-[11px] font-semibold mt-auto transition-all group-hover:gap-2"
+              <div className="flex items-center gap-1 text-[11px] font-semibold mt-auto"
                 style={{ color }}>
                 Go <ArrowRight size={11} />
               </div>
@@ -194,7 +269,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Results table ───────────────────────────────── */}
+      {/* ── Results table ────────────────────────────────── */}
       <div className="card p-4 animate-fade-up delay-500">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-sm font-semibold" style={{ color:"var(--c-text)" }}>
@@ -236,7 +311,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Pipeline tech cards ─────────────────────────── */}
+      {/* ── Pipeline tech cards ──────────────────────────── */}
       <div className="card p-4 animate-fade-up delay-700">
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color:"var(--c-text)" }}>
           <Cpu size={13} style={{ color:T }}/> Full Pipeline Architecture
@@ -254,7 +329,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Recent uploads ──────────────────────────────── */}
+      {/* ── Recent uploads ───────────────────────────────── */}
       {images.length > 0 && (
         <div className="card p-4 animate-fade-up">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -281,9 +356,10 @@ export default function Dashboard() {
                       {img.filename}
                     </td>
                     <td>
-                      <span className={`tag text-[10px] ${img.status==="complete"?"tag-green":img.status==="processing"?"tag-teal":"tag-amber"}`}>
-                        {img.status}
-                      </span>
+                      <span className={`tag text-[10px] ${
+                        img.status==="complete"?"tag-green":
+                        img.status==="processing"?"tag-teal":"tag-amber"
+                      }`}>{img.status}</span>
                     </td>
                     <td className="font-mono">{img.psnr?.toFixed(2)||"—"}</td>
                     <td className="font-mono">{img.ssim?.toFixed(4)||"—"}</td>
