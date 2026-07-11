@@ -1,38 +1,51 @@
 import axios from "axios";
 import toast from "react-hot-toast";
 
-// Render backend URL — set VITE_API_URL in Vercel / Render env vars
-const API_BASE = import.meta.env.VITE_API_URL
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, "")
-  : "";
+/**
+ * API base URL resolution — in order of priority:
+ *
+ * 1. import.meta.env.VITE_API_URL  (set in vercel.json env section or
+ *                                    Vercel dashboard → Settings → Env Vars)
+ * 2. window.__API_URL__            (runtime injection fallback)
+ * 3. Hard-coded Render URL         (last resort so app always works)
+ *
+ * VITE_ prefix is required for Vite to embed the value at build time.
+ * Without it the variable is undefined in the browser bundle.
+ */
+const VITE_URL    = import.meta.env.VITE_API_URL;
+const RUNTIME_URL = typeof window !== "undefined" ? window.__API_URL__ : undefined;
+const FALLBACK    = "https://pulmo-vision-ai.onrender.com";
+
+const API_BASE = (VITE_URL || RUNTIME_URL || FALLBACK).replace(/\/$/, "");
+
+// Log resolved URL during development
+if (import.meta.env.DEV) {
+  console.log("[API] Base URL:", API_BASE,
+    VITE_URL ? "(from VITE_API_URL)" :
+    RUNTIME_URL ? "(from window.__API_URL__)" : "(fallback hardcoded)");
+}
 
 const api = axios.create({
-  baseURL:          `${API_BASE}/api/v1`,
-  timeout:          90000,       // 90 s — covers Render free-tier cold-start
-  withCredentials:  false,
+  baseURL:         `${API_BASE}/api/v1`,
+  timeout:         60000,        // 60 s
+  withCredentials: false,
   headers: {
     "Content-Type": "application/json",
     "Accept":       "application/json",
   },
 });
 
-// ── Silence flags ─────────────────────────────────────────────────────────
-// Calls that should NEVER show an error toast (background polling, health checks)
-const SILENT_URLS = ["health", "ping", "aggregate/summary"];
+// ── Silent endpoints (never show error toasts) ────────────────────────────
+const SILENT = ["health", "ping", "aggregate/summary", "dataset/info",
+                "dataset/psnr", "dataset/ssim", "dataset/mse"];
+const isSilent = (url = "") => SILENT.some(s => url.includes(s));
 
-function isSilent(url = "") {
-  return SILENT_URLS.some(s => url.includes(s));
-}
-
-// ── Deduplicate toasts ────────────────────────────────────────────────────
-// Track the last toast message so we don't spam the same error repeatedly
-let _lastToastMsg = "";
-let _lastToastAt  = 0;
+// ── Toast deduplication ───────────────────────────────────────────────────
+let _lastMsg = ""; let _lastAt = 0;
 function dedupeToast(msg) {
   const now = Date.now();
-  if (msg === _lastToastMsg && now - _lastToastAt < 8000) return;
-  _lastToastMsg = msg;
-  _lastToastAt  = now;
+  if (msg === _lastMsg && now - _lastAt < 8000) return;
+  _lastMsg = msg; _lastAt = now;
   toast.error(msg, { duration: 5000 });
 }
 
@@ -41,32 +54,21 @@ api.interceptors.response.use(
   res => res,
   err => {
     const url = err.config?.url || "";
-
-    // Never toast for background/silent endpoints
     if (isSilent(url)) return Promise.reject(err);
 
-    if (err.code === "ERR_NETWORK" || err.code === "ECONNABORTED") {
-      // Network error — likely Render cold-start or no internet
-      // Show once, not on every retry
-      dedupeToast(
-        err.code === "ECONNABORTED"
-          ? "Request timed out — Render may be cold-starting (wait 30 s)"
-          : "Network error — check your connection"
-      );
+    if (err.code === "ERR_NETWORK") {
+      dedupeToast("Network error — backend may be cold-starting, retrying…");
+    } else if (err.code === "ECONNABORTED") {
+      dedupeToast("Request timed out — Render cold-start takes ~30 s, please wait");
     } else {
       const status = err.response?.status;
-      // Don't toast 401/403 (handled by auth), 404 is usually expected
-      if (status === 401 || status === 403 || status === 404) {
-        return Promise.reject(err);
-      }
+      if (status === 401 || status === 403 || status === 404) return Promise.reject(err);
       const msg =
         err.response?.data?.detail ||
         err.response?.data?.message ||
-        err.message ||
-        "An error occurred";
+        err.message || "An error occurred";
       dedupeToast(msg);
     }
-
     return Promise.reject(err);
   }
 );
@@ -86,7 +88,6 @@ export const apiUploadImage = (file, patientId = "", diagnosis = "unknown") => {
     timeout: 120000,
   });
 };
-
 export const apiListImages  = (limit = 50, offset = 0) =>
   api.get(`/images?limit=${limit}&offset=${offset}`);
 export const apiGetImage    = (id) => api.get(`/images/${id}`);
@@ -96,10 +97,11 @@ export const apiDeleteImage = (id) => api.delete(`/images/${id}`);
 export const apiDenoiseImage = (payload) =>
   api.post("/denoise", payload, { timeout: 120000 });
 
-export const apiPreview = (noisePct = 30, sigma = 0.15, threshold = 0.05, method = "bayesshrink") =>
-  api.post(
-    `/denoise/preview?noise_pct=${noisePct}&sigma=${sigma}&threshold=${threshold}&threshold_method=${method}`
-  );
+export const apiPreview = (
+  noisePct = 30, sigma = 0.15, threshold = 0.05, method = "bayesshrink"
+) => api.post(
+  `/denoise/preview?noise_pct=${noisePct}&sigma=${sigma}&threshold=${threshold}&threshold_method=${method}`
+);
 
 export const apiDownloadDenoised = (imageId) =>
   `${API_BASE}/api/v1/denoise/${imageId}/download`;
@@ -119,7 +121,9 @@ export const apiSsimTable   = () => api.get("/dataset/ssim-table");
 export const apiMseTable    = () => api.get("/dataset/mse-table");
 
 // ── Enhancement ───────────────────────────────────────────────────────────
-export const apiEnhance       = (payload) => api.post("/enhance", payload, { timeout: 120000 });
-export const apiNoiseAnalysis = (id)      => api.get(`/enhance/noise-analysis/${id}`);
+export const apiEnhance       = (payload) =>
+  api.post("/enhance", payload, { timeout: 120000 });
+export const apiNoiseAnalysis = (id) =>
+  api.get(`/enhance/noise-analysis/${id}`);
 
 export default api;
