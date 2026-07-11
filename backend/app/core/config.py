@@ -8,27 +8,50 @@ class Settings(BaseSettings):
     VERSION:  str = "1.0.0"
     DEBUG:    bool = False
 
-    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    # Set this on Render to your custom domain (comma-separated if multiple)
+    # e.g. FRONTEND_URL=https://pulmovisionai.com,https://www.pulmovisionai.com
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "")
 
     @property
     def ALLOWED_ORIGINS(self) -> List[str]:
-        base = [
+        origins = set([
+            # Local dev
             "http://localhost:3000",
             "http://localhost:5173",
             "http://127.0.0.1:3000",
-        ]
-        if self.FRONTEND_URL and self.FRONTEND_URL not in base:
-            base.append(self.FRONTEND_URL)
+            "http://127.0.0.1:5173",
+            # Vercel deployment URLs (covers pulmo-vision-ai.vercel.app)
+            "https://pulmo-vision-ai.vercel.app",
+            "https://pulmo-vision-ai-git-main-monicahmoh4-svg.vercel.app",
+        ])
+
+        # Parse FRONTEND_URL — supports comma-separated list of domains
+        if self.FRONTEND_URL:
+            for url in self.FRONTEND_URL.split(","):
+                url = url.strip().rstrip("/")
+                if url:
+                    origins.add(url)
+                    # Also add www. variant automatically
+                    if url.startswith("https://") and not url.startswith("https://www."):
+                        origins.add(url.replace("https://", "https://www.", 1))
+                    # Also add http:// variant for redirect chains
+                    if url.startswith("https://"):
+                        origins.add(url.replace("https://", "http://", 1))
+
+        # EXTRA_ORIGINS env var — additional comma-separated origins
         extra = os.getenv("EXTRA_ORIGINS", "")
         if extra:
-            base.extend([u.strip() for u in extra.split(",") if u.strip()])
-        return base
+            for url in extra.split(","):
+                url = url.strip().rstrip("/")
+                if url:
+                    origins.add(url)
+
+        return list(origins)
 
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "sqlite+aiosqlite:///./lungdenoise.db"
     )
 
-    # /tmp is always writable on Render; never point to /app
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "/tmp/uploads")
     OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "/tmp/outputs")
     MAX_FILE_SIZE_MB: int = 50
@@ -44,14 +67,13 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
-        extra = "ignore"
+        extra    = "ignore"
 
 
 settings = Settings()
 
 
 def _safe_makedirs(path: str) -> None:
-    """Create directory only if it is /tmp-based or relative — never a system path."""
     abs_path = os.path.abspath(path)
     if abs_path.startswith("/tmp") or not os.path.isabs(path):
         os.makedirs(abs_path, exist_ok=True)
